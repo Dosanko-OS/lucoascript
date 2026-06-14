@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lucoa"
+version = "1.0"
+description = "Interpretador e CLI da linguagem LucoaScript (LS1)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "LucoaScript Team" }
+]
+keywords = ["lucoascript", "ls1", "interpreter", "language", "cli"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Interpreters",
+]
+
+[project.scripts]
+lucoa = "lucoa.cli:main"
+
+[project.entry-points."lucoa.commands"]
+exec = "lucoa.cli:LucoaCLI"
+version = "lucoa.cli:LucoaCLI"
+new = "lucoa.cli:LucoaCLI"
+install = "lucoa.cli:LucoaCLI"
+update = "lucoa.cli:LucoaCLI"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["lucoa*"]

@@ -1,0 +1,16 @@
+use os
+
+write os.getcwd()
+os.mkdir("save")
+write os.exists("save")
+
+file = openlocal("a.txt")
+file.write("demo")
+file.close()
+
+os.rename("a.txt", "b.txt")
+write os.exists("b.txt")
+write os.listdir()
+
+os.chdir("save")
+write os.getcwd()

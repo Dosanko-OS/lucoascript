@@ -1,0 +1,9 @@
+[console_scripts]
+lucoa = lucoa.cli:main
+
+[lucoa.commands]
+exec = lucoa.cli:LucoaCLI
+install = lucoa.cli:LucoaCLI
+new = lucoa.cli:LucoaCLI
+update = lucoa.cli:LucoaCLI
+version = lucoa.cli:LucoaCLI

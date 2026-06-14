@@ -1,0 +1,22 @@
+pkgname=lucoa
+pkgver=1.0
+pkgrel=1
+pkgdesc="LucoaScript CLI and LS1 interpreter"
+arch=("any")
+url="https://example.com/lucoa"
+license=("MIT")
+depends=("python")
+makedepends=("python-build" "python-installer" "python-wheel" "python-setuptools")
+source=("${pkgname}-${pkgver}.tar.gz")
+sha256sums=("SKIP")
+
+build() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  python -m build --wheel --no-isolation
+}
+
+package() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  python -m installer --destdir="${pkgdir}" dist/*.whl
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}
