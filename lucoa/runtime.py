@@ -28,6 +28,7 @@ from .parser import (
     WriteStatement,
 )
 
+print("RUNTIME NOVO CARREGADO")
 
 class RuntimeErrorLS1(Exception):
     """Erro gerado durante a execucao do programa LS1."""
@@ -143,17 +144,36 @@ class ModuleLoader:
         spec.loader.exec_module(module)
         return module
 
+
+    def _load_local_module(self, module_name: str) -> Any | None:
+        module_path = self.runtime.base_directory / "modules" / f"{module_name}.py"
+        if not module_path.exists():
+            return None
+
+        spec = importlib.util.spec_from_file_location(
+            f"ls1_module_{module_name}", module_path
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeErrorLS1(
+                f"Nao foi possivel carregar o modulo local '{module_name}'."
+            )
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
     def _load_internal_module(self, module_name: str) -> Any | None:
         internal_name = f"lucoa.modules.{module_name}"
+
         try:
             return importlib.import_module(internal_name)
+
         except ModuleNotFoundError as exc:
             if exc.name == internal_name:
                 return None
             raise
 
     def _register_exports(self, module_name: str, module: Any) -> None:
-        # Modulos podem registrar comportamento diretamente ou expor valores prontos.
         if hasattr(module, "register"):
             module.register(self.runtime)
             return
@@ -163,6 +183,29 @@ class ModuleLoader:
             for name, value in exports.items():
                 self.runtime.environment.define(name, value)
             return
+
+        try:
+            print("TENTANDO IMPORTAR PYTHON:", module_name)
+
+            py_module = importlib.import_module(module_name)
+
+            print("IMPORTOU!")
+
+            # permite math.sqrt()
+            self.runtime.environment.define(module_name, py_module)
+
+            # permite sqrt()
+            for attr in dir(py_module):
+                if not attr.startswith("_"):
+                    self.runtime.environment.define(
+                        attr,
+                        getattr(py_module, attr),
+                    )
+
+            return
+
+        except Exception as e:
+            print("ERRO:", repr(e))
 
         raise RuntimeErrorLS1(
             f"Modulo '{module_name}' precisa expor register(runtime) ou EXPORTS."
