@@ -23,9 +23,15 @@ class LucoaCLI:
     def _register_commands(self) -> None:
         self._register_exec_command()
         self._register_version_command()
-        self._register_future_command("new", "Cria um novo projeto LucoaScript.", "project_name")
-        self._register_future_command("install", "Instala um modulo LucoaScript.", "module_name")
-        self._register_future_command("update", "Atualiza ferramentas ou modulos do LucoaScript.")
+        self._register_future_command(
+            "new", "Cria um novo projeto LucoaScript.", "project_name"
+        )
+        self._register_future_command(
+            "install", "Instala um modulo LucoaScript.", "module_name"
+        )
+        self._register_future_command(
+            "update", "Atualiza ferramentas ou modulos do LucoaScript."
+        )
 
     def _register_exec_command(self) -> None:
         exec_parser = self.subparsers.add_parser(

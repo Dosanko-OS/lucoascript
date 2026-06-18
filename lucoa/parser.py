@@ -110,7 +110,30 @@ class MemberAccessExpression(Expression):
 @dataclass
 class CallExpression(Expression):
     callee: Expression
-    arguments: list[Expression]
+    positional_arguments: list[Expression]
+    named_arguments: list[NamedArgument]
+
+
+@dataclass
+class ListLiteral(Expression):
+    elements: list[Expression]
+
+
+@dataclass
+class IndexExpression(Expression):
+    target: Expression
+    index: Expression
+
+
+@dataclass
+class ObjectLiteral(Expression):
+    pairs: dict[str, Expression]
+
+
+@dataclass
+class NamedArgument:
+    name: str
+    value: Expression
 
 
 class Parser:
@@ -122,11 +145,9 @@ class Parser:
 
     def parse(self) -> Program:
         statements: list[Statement] = []
-        self._skip_newlines()
 
         while not self._check("EOF"):
             statements.append(self._parse_statement())
-            self._skip_newlines()
 
         return Program(statements)
 
@@ -177,15 +198,12 @@ class Parser:
     def _parse_if_statement(self) -> IfStatement:
         branches = [IfBranch(self._parse_expression(), self._parse_block())]
         else_body: list[Statement] | None = None
-        self._skip_newlines()
 
         while self._match("ELIF"):
             branches.append(IfBranch(self._parse_expression(), self._parse_block()))
-            self._skip_newlines()
 
         if self._match("ELSE"):
             else_body = self._parse_block()
-            self._skip_newlines()
 
         return IfStatement(branches, else_body)
 
@@ -198,12 +216,10 @@ class Parser:
         self._expect("TO", "Esperava a palavra-chave 'to'.")
         end_expression = self._parse_expression()
         body = self._parse_block()
-        self._skip_newlines()
         return LoopStatement(variable_name, start_expression, end_expression, body)
 
     def _parse_block(self) -> list[Statement]:
         self._expect("LPAREN", "Esperava '(' para abrir o bloco.")
-        self._skip_newlines()
         statements: list[Statement] = []
 
         while not self._check("RPAREN"):
@@ -214,7 +230,6 @@ class Parser:
                 )
 
             statements.append(self._parse_statement())
-            self._skip_newlines()
 
         self._advance()
         return statements
@@ -283,20 +298,40 @@ class Parser:
 
         while True:
             # Em cabecalhos como "if condicao (" o parenteses abre bloco, nao chamada.
-            if self._check("LPAREN") and not self._check_next("NEWLINE"):
+
+            if self._check("LPAREN"):
                 self._advance()
+
                 arguments: list[Expression] = []
+                named_arguments: list[NamedArgument] = []
+
                 if not self._check("RPAREN"):
-                    arguments.append(self._parse_expression())
-                    while self._match("COMMA"):
-                        arguments.append(self._parse_expression())
+
+                    while True:
+
+                        if self._check("IDENTIFIER") and self._check_next("ASSIGN"):
+
+                            name = self._advance().value
+                            self._advance()
+
+                            value = self._parse_expression()
+
+                            named_arguments.append(NamedArgument(name, value))
+
+                        else:
+                            arguments.append(self._parse_expression())
+
+                        if not self._match("COMMA"):
+                            break
+
                 self._expect("RPAREN", "Esperava ')' para fechar a chamada.")
-                expression = CallExpression(expression, arguments)
-                continue
+
+                expression = CallExpression(expression, arguments, named_arguments)
 
             if self._match("DOT"):
                 member_name = self._expect_member_name()
                 expression = MemberAccessExpression(expression, member_name)
+
                 continue
 
             break
@@ -363,7 +398,6 @@ class Parser:
 
     def _consume_statement_end(self) -> None:
         if self._match("NEWLINE"):
-            self._skip_newlines()
             return
 
         if self._check("EOF") or self._check("RPAREN"):

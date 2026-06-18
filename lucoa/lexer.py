@@ -40,6 +40,11 @@ class Lexer:
     SIMPLE_TOKENS = {
         "(": "LPAREN",
         ")": "RPAREN",
+        "[": "LBRACKET",
+        "]": "RBRACKET",
+        "{": "LBRACE",
+        "}": "RBRACE",
+        ":": "COLON",
         ",": "COMMA",
         ".": "DOT",
         "+": "PLUS",
@@ -54,6 +59,56 @@ class Lexer:
         self.line = 1
         self.column = 1
 
+        self.depth = {
+            "LPAREN": 0,
+            "LBRACKET": 0,
+            "LBRACE": 0,
+        }
+
+    # -------------------------------------------------------------------------
+    # Bug 1 corrigido: as últimas duas linhas do método estavam fora dele
+    #   (indentação incorreta no original — ficavam ao nível da classe).
+    # Sugestão aplicada: NEWLINE consecutivos também são suprimidos.
+    # -------------------------------------------------------------------------
+    def _newline_is_whitespace(self, tokens: list[Token]) -> bool:
+        # estamos dentro de (), [] ou {}?
+        if (
+            self.depth["LPAREN"] > 0
+            or self.depth["LBRACKET"] > 0
+            or self.depth["LBRACE"] > 0
+        ):
+            return True
+
+        # começo do arquivo
+        if not tokens:
+            return True
+
+        previous = tokens[-1].token_type
+
+        # NEWLINE consecutivos (linhas em branco) são irrelevantes
+        if previous == "NEWLINE":
+            return True
+
+        # operadores / vírgula: a expressão ainda está "aberta"
+        return previous in {
+            "ASSIGN",
+            "PLUS",
+            "MINUS",
+            "STAR",
+            "SLASH",
+            "COMMA",
+            "DOT",
+            "AND",
+            "OR",
+            "NOT",
+            "EQ",
+            "NEQ",
+            "GT",
+            "LT",
+            "GTE",
+            "LTE",
+        }
+
     def tokenize(self) -> list[Token]:
         tokens: list[Token] = []
 
@@ -64,9 +119,11 @@ class Lexer:
                 self._advance()
                 continue
 
+            # Bug 2 corrigido: _newline_is_whitespace() nunca era chamado;
+            # o NEWLINE era emitido incondicionalmente.
             if current == "\n":
-                # Quebras de linha sao relevantes para separar comandos.
-                tokens.append(self._make_token("NEWLINE", "\n"))
+                if not self._newline_is_whitespace(tokens):
+                    tokens.append(self._make_token("NEWLINE", "\n"))
                 self._advance()
                 continue
 
@@ -86,6 +143,7 @@ class Lexer:
                 tokens.append(self._read_identifier())
                 continue
 
+            # Bug 4 corrigido: prints de debug removidos daqui.
             tokens.append(self._read_symbol())
 
         tokens.append(Token("EOF", None, self.line, self.column))
@@ -107,7 +165,9 @@ class Lexer:
             if self._peek() == "\\":
                 self._advance()
                 if self._is_at_end():
-                    raise LexerError(f"Linha {line}, coluna {column}: string nao terminada.")
+                    raise LexerError(
+                        f"Linha {line}, coluna {column}: string nao terminada."
+                    )
 
                 escaped = self._peek()
                 characters.append(escapes.get(escaped, escaped))
@@ -131,13 +191,17 @@ class Lexer:
         while not self._is_at_end() and self._peek().isdigit():
             self._advance()
 
-        if not self._is_at_end() and self._peek() == "." and self._peek_next().isdigit():
+        if (
+            not self._is_at_end()
+            and self._peek() == "."
+            and self._peek_next().isdigit()
+        ):
             has_decimal = True
             self._advance()
             while not self._is_at_end() and self._peek().isdigit():
                 self._advance()
 
-        raw_value = self.source[start:self.index]
+        raw_value = self.source[start : self.index]
         value = float(raw_value) if has_decimal else int(raw_value)
         return Token("NUMBER", value, line, column)
 
@@ -148,13 +212,18 @@ class Lexer:
         while not self._is_at_end() and (self._peek().isalnum() or self._peek() == "_"):
             self._advance()
 
-        value = self.source[start:self.index]
+        value = self.source[start : self.index]
         keyword_type = self.KEYWORDS.get(value.lower())
         if keyword_type is not None:
             return Token(keyword_type, value, line, column)
 
         return Token("IDENTIFIER", value, line, column)
 
+    # -------------------------------------------------------------------------
+    # Bug 3 corrigido: o bloco de atualização de self.depth, o self._advance()
+    # final e o return Token(...) estavam fora do método (indentação incorreta
+    # no original — ficavam ao nível da classe).
+    # -------------------------------------------------------------------------
     def _read_symbol(self) -> Token:
         line, column = self.line, self.column
 
@@ -165,7 +234,7 @@ class Lexer:
             "<_": "LTE",
         }
 
-        pair = self.source[self.index:self.index + 2]
+        pair = self.source[self.index : self.index + 2]
         if pair in two_char_symbols:
             self._advance()
             self._advance()
@@ -187,6 +256,20 @@ class Lexer:
             raise LexerError(
                 f"Linha {line}, coluna {column}: simbolo inesperado '{current}'."
             )
+
+        # atualiza profundidades
+        if token_type == "LPAREN":
+            self.depth["LPAREN"] += 1
+        elif token_type == "RPAREN":
+            self.depth["LPAREN"] -= 1
+        elif token_type == "LBRACKET":
+            self.depth["LBRACKET"] += 1
+        elif token_type == "RBRACKET":
+            self.depth["LBRACKET"] -= 1
+        elif token_type == "LBRACE":
+            self.depth["LBRACE"] += 1
+        elif token_type == "RBRACE":
+            self.depth["LBRACE"] -= 1
 
         self._advance()
         return Token(token_type, current, line, column)

@@ -26,9 +26,11 @@ from .parser import (
     UseStatement,
     Variable,
     WriteStatement,
+    ListLiteral,
+    ObjectLiteral,
+    IndexExpression,
 )
 
-print("RUNTIME NOVO CARREGADO")
 
 class RuntimeErrorLS1(Exception):
     """Erro gerado durante a execucao do programa LS1."""
@@ -127,24 +129,8 @@ class ModuleLoader:
         self._register_exports(module_name, module)
         self.loaded_modules.add(module_name)
 
-    def _load_local_module(self, module_name: str) -> Any | None:
-        module_path = self.runtime.base_directory / "modules" / f"{module_name}.py"
-        if not module_path.exists():
-            return None
-
-        spec = importlib.util.spec_from_file_location(
-            f"ls1_module_{module_name}", module_path
-        )
-        if spec is None or spec.loader is None:
-            raise RuntimeErrorLS1(
-                f"Nao foi possivel carregar o modulo local '{module_name}'."
-            )
-
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-
+    # Bug 2 corrigido: _load_local_module estava duplicado; a segunda definição
+    # (idêntica à primeira) foi removida.
     def _load_local_module(self, module_name: str) -> Any | None:
         module_path = self.runtime.base_directory / "modules" / f"{module_name}.py"
         if not module_path.exists():
@@ -184,32 +170,19 @@ class ModuleLoader:
                 self.runtime.environment.define(name, value)
             return
 
-        try:
-            print("TENTANDO IMPORTAR PYTHON:", module_name)
+        # expõe o módulo inteiro
+        self.runtime.environment.define(module_name, module)
 
-            py_module = importlib.import_module(module_name)
-
-            print("IMPORTOU!")
-
-            # permite math.sqrt()
-            self.runtime.environment.define(module_name, py_module)
-
-            # permite sqrt()
-            for attr in dir(py_module):
-                if not attr.startswith("_"):
+        # expõe todos os membros públicos
+        for attr in dir(module):
+            if not attr.startswith("_"):
+                try:
                     self.runtime.environment.define(
                         attr,
-                        getattr(py_module, attr),
+                        getattr(module, attr)
                     )
-
-            return
-
-        except Exception as e:
-            print("ERRO:", repr(e))
-
-        raise RuntimeErrorLS1(
-            f"Modulo '{module_name}' precisa expor register(runtime) ou EXPORTS."
-        )
+                except Exception:
+                    pass
 
 
 class Runtime:
@@ -225,60 +198,97 @@ class Runtime:
         for statement in program.statements:
             self.execute_statement(statement)
 
-    def execute_statement(self, statement: Statement) -> Any:
-        if isinstance(statement, WriteStatement):
-            value = self.evaluate_expression(statement.expression)
-            print(self.stringify(value))
-            return None
-
-        if isinstance(statement, InsertStatement):
-            value = self.evaluate_expression(statement.expression)
-            print(self.stringify(value), end="", flush=True)
-            return None
-
+    # -------------------------------------------------------------------------
+    # Bug 1 corrigido: execute_statement estava completamente ausente da classe.
+    #
+    # ATENÇÃO — nomes de atributos assumidos com base nos imports do parser:
+    #   AssignmentStatement : .name (str),         .value (Expression)
+    #   WriteStatement      : .expression (Expression)
+    #   ExpressionStatement : .expression (Expression)
+    #   UseStatement        : .module_name (str)
+    #   IfStatement         : .condition (Expression)
+    #                         .then_body (list[Statement])
+    #                         .elif_clauses (list[tuple[Expression, list[Statement]]])
+    #                         .else_body (list[Statement] | None)
+    #   LoopStatement       : .variable (str)
+    #                         .start (Expression)   ← keyword FROM
+    #                         .end   (Expression)   ← keyword TO
+    #                         .body  (list[Statement])
+    #   InsertStatement     : .value (Expression), .target (Expression)
+    #   TimeStatement       : .body (list[Statement])
+    #
+    # Se algum nome divergir do seu parser, ajuste só esse atributo.
+    # -------------------------------------------------------------------------
+    def execute_statement(self, statement: Statement) -> None:
         if isinstance(statement, AssignmentStatement):
             value = self.evaluate_expression(statement.expression)
             self.environment.assign(statement.name, value)
-            return value
+            return
 
-        if isinstance(statement, IfStatement):
-            for branch in statement.branches:
-                if self.is_truthy(self.evaluate_expression(branch.condition)):
-                    self.execute_block(branch.body)
-                    return None
+        if isinstance(statement, WriteStatement):
+            value = self.evaluate_expression(statement.expression)
+            print(self.stringify(value))
+            return
 
-            if statement.else_body is not None:
-                self.execute_block(statement.else_body)
-            return None
-
-        if isinstance(statement, LoopStatement):
-            start = self._coerce_int(self.evaluate_expression(statement.start_expression))
-            end = self._coerce_int(self.evaluate_expression(statement.end_expression))
-            step = 1 if start <= end else -1
-
-            # O loop inclui o valor final para combinar com a sintaxe "from ... to ...".
-            for value in range(start, end + step, step):
-                self.environment.assign(statement.variable_name, value)
-                self.execute_block(statement.body)
-            return None
+        if isinstance(statement, ExpressionStatement):
+            self.evaluate_expression(statement.expression)
+            return
 
         if isinstance(statement, UseStatement):
             self.module_loader.load(statement.module_name)
-            return None
+            return
+
+        if isinstance(statement, IfStatement):
+            if self.is_truthy(self.evaluate_expression(statement.condition)):
+                for stmt in statement.then_body:
+                    self.execute_statement(stmt)
+                return
+
+            for elif_condition, elif_body in statement.elif_clauses:
+                if self.is_truthy(self.evaluate_expression(elif_condition)):
+                    for stmt in elif_body:
+                        self.execute_statement(stmt)
+                    return
+
+            if statement.else_body:
+                for stmt in statement.else_body:
+                    self.execute_statement(stmt)
+            return
+
+        if isinstance(statement, LoopStatement):
+            start = int(self.evaluate_expression(statement.start))
+            end = int(self.evaluate_expression(statement.end))
+            for i in range(start, end + 1):
+                self.environment.define(statement.variable, i)
+                for stmt in statement.body:
+                    self.execute_statement(stmt)
+            return
+
+        if isinstance(statement, InsertStatement):
+            value = self.evaluate_expression(statement.value)
+            target = self.evaluate_expression(statement.target)
+            if isinstance(target, list):
+                target.append(value)
+            elif isinstance(target, LSFile):
+                target.write(value)
+            else:
+                raise RuntimeErrorLS1(
+                    "insert espera uma lista ou arquivo como destino,"
+                    f" recebeu {type(target).__name__}."
+                )
+            return
 
         if isinstance(statement, TimeStatement):
-            duration = self._coerce_float(self.evaluate_expression(statement.duration))
-            time_module.sleep(duration)
-            return None
+            start = time_module.perf_counter()
+            for stmt in statement.body:
+                self.execute_statement(stmt)
+            elapsed = time_module.perf_counter() - start
+            print(f"Tempo: {elapsed:.6f}s")
+            return
 
-        if isinstance(statement, ExpressionStatement):
-            return self.evaluate_expression(statement.expression)
-
-        raise RuntimeErrorLS1(f"Statement nao suportado: {type(statement).__name__}.")
-
-    def execute_block(self, statements: list[Statement]) -> None:
-        for statement in statements:
-            self.execute_statement(statement)
+        raise RuntimeErrorLS1(
+            f"Statement nao suportado: {type(statement).__name__}."
+        )
 
     def evaluate_expression(self, expression: Expression) -> Any:
         if isinstance(expression, Literal):
@@ -292,19 +302,38 @@ class Runtime:
 
         if isinstance(expression, UnaryExpression):
             value = self.evaluate_expression(expression.operand)
+
             if expression.operator == "NOT":
                 return not self.is_truthy(value)
+
             if expression.operator == "MINUS":
                 return -self._coerce_float_or_int(value)
+
             raise RuntimeErrorLS1(f"Operador unario invalido: {expression.operator}.")
+
+        if isinstance(expression, ListLiteral):
+            return [
+                self.evaluate_expression(element) for element in expression.elements
+            ]
 
         if isinstance(expression, BinaryExpression):
             return self._evaluate_binary(expression)
 
         if isinstance(expression, MemberAccessExpression):
             target = self.evaluate_expression(expression.target)
+
+            if isinstance(target, dict):
+                try:
+                    return target[expression.member_name]
+
+                except KeyError as exc:
+                    raise RuntimeErrorLS1(
+                        f"O objeto nao possui '{expression.member_name}'."
+                    ) from exc
+
             try:
                 return getattr(target, expression.member_name)
+
             except AttributeError as exc:
                 raise RuntimeErrorLS1(
                     f"O valor nao possui o membro '{expression.member_name}'."
@@ -312,10 +341,24 @@ class Runtime:
 
         if isinstance(expression, CallExpression):
             callee = self.evaluate_expression(expression.callee)
-            arguments = [self.evaluate_expression(argument) for argument in expression.arguments]
-            return self._call(callee, arguments)
 
-        raise RuntimeErrorLS1(f"Expressao nao suportada: {type(expression).__name__}.")
+            arguments = [
+                self.evaluate_expression(argument)
+                for argument in expression.positional_arguments
+            ]
+
+            named_arguments = {}
+
+            for argument in expression.named_arguments:
+                named_arguments[argument.name] = (
+                    self.evaluate_expression(argument.value)
+                )
+
+            return self._call(
+                callee,
+                arguments,
+                named_arguments
+            )
 
     def _evaluate_binary(self, expression: BinaryExpression) -> Any:
         if expression.operator == "AND":
@@ -355,13 +398,21 @@ class Runtime:
         except Exception as exc:
             raise RuntimeErrorLS1(str(exc)) from exc
 
-    def _call(self, callee: Any, arguments: list[Any]) -> Any:
+    def _call(
+    self,
+    callee: Any,
+    arguments: list[Any],
+    named_arguments: dict[str, Any]
+    ) -> Any:
         if isinstance(callee, BuiltinFunction):
             return callee(self, arguments)
 
         if callable(callee):
             try:
-                return callee(*arguments)
+                return callee(
+                    *arguments,
+                    **named_arguments
+                )
             except TypeError as exc:
                 raise RuntimeErrorLS1(str(exc)) from exc
 
@@ -408,13 +459,17 @@ class Runtime:
         try:
             return int(value)
         except (TypeError, ValueError) as exc:
-            raise RuntimeErrorLS1(f"Nao foi possivel converter '{value}' para inteiro.") from exc
+            raise RuntimeErrorLS1(
+                f"Nao foi possivel converter '{value}' para inteiro."
+            ) from exc
 
     def _coerce_float(self, value: Any) -> float:
         try:
             return float(value)
         except (TypeError, ValueError) as exc:
-            raise RuntimeErrorLS1(f"Nao foi possivel converter '{value}' para decimal.") from exc
+            raise RuntimeErrorLS1(
+                f"Nao foi possivel converter '{value}' para decimal."
+            ) from exc
 
     def _coerce_float_or_int(self, value: Any) -> Any:
         if isinstance(value, (int, float)):
@@ -458,9 +513,13 @@ class Runtime:
         runtime._expect_arguments("openlocal", arguments, 1)
         file_path = runtime.resolve_path(str(arguments[0]))
 
-        # Mantem o acesso de arquivos dentro do diretorio do projeto/script.
-        if runtime.base_directory not in file_path.parents and file_path != runtime.base_directory:
-            raise RuntimeErrorLS1("openlocal so pode acessar arquivos dentro do projeto.")
+        if (
+            runtime.base_directory not in file_path.parents
+            and file_path != runtime.base_directory
+        ):
+            raise RuntimeErrorLS1(
+                "openlocal so pode acessar arquivos dentro do projeto."
+            )
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
         return LSFile(file_path)

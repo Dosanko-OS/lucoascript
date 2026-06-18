@@ -1,2 +1,1 @@
 """Modulos internos do LucoaScript."""
-
